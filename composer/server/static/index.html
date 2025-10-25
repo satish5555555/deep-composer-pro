@@ -32,7 +32,7 @@
       const [status,setStatus] = React.useState(null);
       const [health,setHealth] = React.useState(null);
 
-      React.useEffect(()=>{ fetch('/api/health').then(r=>r.json()).then(setHealth); },[]);
+      React.useEffect(()=>{ fetch(window.location.origin +'/api/health').then(r=>r.json()).then(setHealth); },[]);
 
       async function upload(){
         const fd = new FormData();

@@ -1,9 +1,11 @@
-import uuid, threading
+import uuid, threading, subprocess
 from pathlib import Path
 from typing import Dict, Optional, List
+
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 import torch, torchaudio
 
@@ -11,23 +13,47 @@ from .model_service import improve_audio_file
 from .ml_models.trainer import train_model
 from .generator import generate_audio
 
+# ======================================================
+# Paths
+# ======================================================
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 UPLOADS_DIR = DATA_DIR / "uploads"
 OUTPUTS_DIR = DATA_DIR / "outputs"
 CKPT_DIR = DATA_DIR / "checkpoints"
+
 for p in (UPLOADS_DIR, OUTPUTS_DIR, CKPT_DIR):
     p.mkdir(parents=True, exist_ok=True)
 
+# ======================================================
+# App
+# ======================================================
 app = FastAPI(title="Deep Composer Pro", version="1.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-# Static file serving for UI and artifacts
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ======================================================
+# Static & UI Mount
+# ======================================================
 app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR), html=False), name="uploads")
 app.mount("/outputs", StaticFiles(directory=str(OUTPUTS_DIR), html=False), name="outputs")
 app.mount("/checkpoints", StaticFiles(directory=str(CKPT_DIR), html=False), name="checkpoints")
-app.mount("/", StaticFiles(directory=str(BASE_DIR / "server" / "static"), html=True), name="ui")
+app.mount("/ui", StaticFiles(directory=str(BASE_DIR / "server" / "static"), html=True), name="ui")
 
+@app.get("/")
+def root_redirect():
+    """Redirect root URL to the UI"""
+    return RedirectResponse(url="/ui/")
+
+# ======================================================
+# Jobs
+# ======================================================
 class JobStatus(BaseModel):
     id: str
     kind: str
@@ -54,11 +80,20 @@ def _start(kind: str, fn, *args, **kwargs) -> JobStatus:
     threading.Thread(target=_run_job, args=(jid, fn, *args), kwargs=kwargs, daemon=True).start()
     return st
 
+# ======================================================
+# API Endpoints
+# ======================================================
 @app.get("/api/health")
 def health():
     cuda = torch.cuda.is_available()
     gpus = [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())] if cuda else []
-    return {"status":"ok","torch":torch.__version__,"torchaudio":torchaudio.__version__,"cuda":cuda,"gpus":gpus}
+    return {
+        "status": "ok",
+        "torch": torch.__version__,
+        "torchaudio": torchaudio.__version__,
+        "cuda": cuda,
+        "gpus": gpus,
+    }
 
 @app.post("/api/upload")
 async def upload(files: List[UploadFile] = File(...)):
@@ -67,7 +102,13 @@ async def upload(files: List[UploadFile] = File(...)):
         dst = UPLOADS_DIR / file.filename
         with open(dst, "wb") as f:
             f.write(await file.read())
-        saved.append(file.filename)
+        # Auto convert MP3 -> WAV for training compatibility
+        if dst.suffix.lower() == ".mp3":
+            wav_path = dst.with_suffix(".wav")
+            subprocess.run(["ffmpeg", "-y", "-i", str(dst), str(wav_path)], check=True)
+            dst.unlink()
+            dst = wav_path
+        saved.append(dst.name)
     return {"ok": True, "files": saved}
 
 @app.post("/api/improve")
@@ -125,3 +166,4 @@ def status(job_id: str):
     if not st:
         raise HTTPException(404, "Unknown job")
     return st
+

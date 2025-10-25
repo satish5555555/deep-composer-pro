@@ -1,0 +1,103 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Deep Composer Pro</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu;max-width:980px;margin:40px auto;padding:0 16px;}
+    .row{margin:16px 0;padding:16px;border:1px solid #eee;border-radius:12px}
+    button{padding:8px 14px;border-radius:8px;border:1px solid #333;background:#111;color:#fff;cursor:pointer}
+    input[type="text"],input[type="number"]{padding:8px 10px;border-radius:8px;border:1px solid #ccc;width:320px}
+    ul{line-height:1.8}
+    .mono{font-family: ui-monospace, Menlo, Consolas, "Courier New", monospace; font-size: 13px;}
+    .muted{color:#666}
+  </style>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+</head>
+<body>
+  <h1>🎼 Deep Composer Pro</h1>
+  <p class="muted">Upload multiple WAVs, train, generate, and enhance audio. GPU required for best results.</p>
+  <div id="app"></div>
+
+  <script>
+    const e = React.createElement;
+    function App(){
+      const [files,setFiles] = React.useState([]);
+      const [epochs,setEpochs] = React.useState(5);
+      const [prompt,setPrompt] = React.useState("Calm ambient pad");
+      const [duration,setDuration] = React.useState(12);
+      const [job,setJob] = React.useState(null);
+      const [status,setStatus] = React.useState(null);
+      const [health,setHealth] = React.useState(null);
+
+      React.useEffect(()=>{ fetch('/api/health').then(r=>r.json()).then(setHealth); },[]);
+
+      async function upload(){
+        const fd = new FormData();
+        for (const f of files) fd.append("files", f);
+        const r = await fetch('/api/upload',{method:'POST', body: fd});
+        const j = await r.json();
+        alert("Uploaded: " + j.files.join(", "));
+      }
+      async function train(){
+        const r = await fetch('/api/train',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({epochs})});
+        const j = await r.json(); setJob(j.job); poll(j.job);
+      }
+      async function generate(){
+        const r = await fetch('/api/generate',{method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({prompt, duration})});
+        const j = await r.json(); setJob(j.job); poll(j.job);
+      }
+      async function improve(){
+        const fname = prompt('Enter uploaded filename (e.g., sample.wav)');
+        if(!fname) return;
+        const fd = new FormData(); fd.append('filename', fname);
+        const r = await fetch('/api/improve',{method:'POST', body: fd});
+        const j = await r.json(); setJob(j.job); poll(j.job);
+      }
+      async function poll(jid){
+        const intv = setInterval(async ()=>{
+          const r = await fetch('/api/status/'+jid); const s = await r.json();
+          setStatus(s);
+          if(s.status!=="running" && s.status!=="pending"){ clearInterval(intv); }
+        }, 1000);
+      }
+
+      return e('div', null,
+        e('div',{className:'row'},
+          e('h3', null, 'System Health'),
+          e('pre',{className:'mono'}, health? JSON.stringify(health,null,2) : 'Checking...')
+        ),
+        e('div',{className:'row'},
+          e('h3', null, 'Upload (multiple WAVs)'),
+          e('input',{type:'file', multiple:true, onChange:ev=>setFiles(ev.target.files)}),
+          e('div', null, e('button',{onClick:upload},'Upload'))
+        ),
+        e('div',{className:'row'},
+          e('h3', null, 'Train'),
+          e('input',{type:'number', value:epochs, onChange:ev=>setEpochs(parseInt(ev.target.value)||1)}),
+          e('div', null, e('button',{onClick:train},'Start Training'))
+        ),
+        e('div',{className:'row'},
+          e('h3', null, 'Generate'),
+          e('input',{type:'text', value:prompt, onChange:ev=>setPrompt(ev.target.value)}),
+          e('div', null, 'Duration (sec): ',
+            e('input',{type:'number', value:duration, onChange:ev=>setDuration(parseInt(ev.target.value)||8)})),
+          e('div', null, e('button',{onClick:generate},'Generate'))
+        ),
+        e('div',{className:'row'},
+          e('h3', null, 'Improve'),
+          e('p',{className:'muted'}, 'Enter a previously uploaded filename to master it.'),
+          e('button',{onClick:improve},'Improve...')
+        ),
+        e('div',{className:'row'},
+          e('h3', null, 'Job Status'),
+          e('pre',{className:'mono'}, status? JSON.stringify(status,null,2) : 'No job yet')
+        )
+      );
+    }
+    ReactDOM.createRoot(document.getElementById('app')).render(e(App));
+  </script>
+</body>
+</html>

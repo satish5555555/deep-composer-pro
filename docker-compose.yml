@@ -1,0 +1,19 @@
+version: '3.8'
+services:
+  backend:
+    build: ./composer
+    container_name: deep-composer-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./assets:/app/assets
+      - ./composer/server/ml_models/weights:/app/server/ml_models/weights
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
